@@ -1,1 +1,144 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.gridspec import GridSpec
 
+# Load and prepare data
+data = """[your CSV data here]"""
+df = pd.read_csv(pd.compat.StringIO(data), skipinitialspace=True)
+df = df.dropna(axis=1, how='all')  # Remove empty columns
+df = df[df['Set'].isin(['Training', 'Testing', 'Validation'])]
+
+# Convert numeric columns
+numeric_cols = ['IFT_Actual', 'IFT_Prediction', 'Residual', 'Standarized']
+df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+df = df.dropna(subset=numeric_cols)
+
+# Create dashboard
+plt.figure(figsize=(18, 18))
+gs = GridSpec(3, 2, figure=plt.gcf(), height_ratios=[1, 1, 1.2])
+plt.suptitle('Residual Analysis Dashboard', fontsize=20, y=0.98)
+
+# Color mapping
+set_colors = {'Training': '#1f77b4', 'Testing': '#2ca02c', 'Validation': '#ff7f0e'}
+algorithm_markers = {'XGB': 'o', 'RF': 's', 'DT': '^', 'SVM': 'D'}
+
+# Plot 1: Residuals vs Predicted Values
+ax1 = plt.subplot(gs[0, 0])
+for set_name, color in set_colors.items():
+    for algo, marker in algorithm_markers.items():
+        subset = df[(df['Set'] == set_name) & (df['Algorithm'] == algo)]
+        if not subset.empty:
+            ax1.scatter(subset['IFT_Prediction'], subset['Residual'], 
+                        c=color, marker=marker, alpha=0.7, s=60,
+                        label=f"{set_name} - {algo}")
+ax1.axhline(0, color='r', linestyle='--', alpha=0.7)
+ax1.set_xlabel('Predicted Values', fontsize=12)
+ax1.set_ylabel('Residuals', fontsize=12)
+ax1.set_title('Residuals vs Predicted Values', fontsize=14)
+ax1.grid(True, alpha=0.2)
+
+# Plot 2: Residuals vs Actual Values
+ax2 = plt.subplot(gs[0, 1])
+for set_name, color in set_colors.items():
+    for algo, marker in algorithm_markers.items():
+        subset = df[(df['Set'] == set_name) & (df['Algorithm'] == algo)]
+        if not subset.empty:
+            ax2.scatter(subset['IFT_Actual'], subset['Residual'], 
+                        c=color, marker=marker, alpha=0.7, s=60)
+ax2.axhline(0, color='r', linestyle='--', alpha=0.7)
+ax2.set_xlabel('Actual Values', fontsize=12)
+ax2.set_ylabel('Residuals', fontsize=12)
+ax2.set_title('Residuals vs Actual Values', fontsize=14)
+ax2.grid(True, alpha=0.2)
+
+# Plot 3: Standardized Residuals
+ax3 = plt.subplot(gs[1, 0])
+for set_name, color in set_colors.items():
+    subset = df[df['Set'] == set_name]
+    if not subset.empty:
+        sns.kdeplot(subset['Standarized'], color=color, label=set_name, ax=ax3, fill=True, alpha=0.3)
+ax3.axvline(0, color='r', linestyle='--', alpha=0.7)
+ax3.set_xlabel('Standardized Residuals', fontsize=12)
+ax3.set_ylabel('Density', fontsize=12)
+ax3.set_title('Distribution of Standardized Residuals', fontsize=14)
+ax3.set_xlim([-5, 5])
+ax3.grid(True, alpha=0.2)
+ax3.legend()
+
+# Plot 4: Residual Distribution
+ax4 = plt.subplot(gs[1, 1])
+for set_name, color in set_colors.items():
+    subset = df[df['Set'] == set_name]
+    if not subset.empty:
+        sns.histplot(subset['Residual'], color=color, label=set_name, 
+                     kde=True, element='step', alpha=0.4, ax=ax4)
+ax4.axvline(0, color='r', linestyle='--', alpha=0.7)
+ax4.set_xlabel('Residuals', fontsize=12)
+ax4.set_ylabel('Frequency', fontsize=12)
+ax4.set_title('Residual Distribution', fontsize=14)
+ax4.grid(True, alpha=0.2)
+
+# Statistical Summary Table
+ax5 = plt.subplot(gs[2, :])
+ax5.axis('off')
+
+# Calculate statistics
+def calculate_metrics(group):
+    return pd.Series({
+        'RMSE': np.sqrt(np.mean(group['Residual']**2)),
+        'MAE': np.mean(np.abs(group['Residual'])),
+        'Mean Residual': np.mean(group['Residual']),
+        'Count': len(group)
+    })
+
+# By algorithm and set
+metrics_df = df.groupby(['Algorithm', 'Set']).apply(calculate_metrics).reset_index()
+metrics_df = metrics_df.round(4)
+
+# By set (overall)
+overall_metrics = df.groupby('Set').apply(calculate_metrics).reset_index()
+overall_metrics['Algorithm'] = 'Overall'
+
+# Combine results
+final_metrics = pd.concat([metrics_df, overall_metrics], ignore_index=True)
+final_metrics = final_metrics.sort_values(by=['Set', 'Algorithm'])
+
+# Create table
+table_data = [['Set', 'Algorithm', 'RMSE', 'MAE', 'Mean Residual', 'Count']] + \
+             final_metrics[['Set', 'Algorithm', 'RMSE', 'MAE', 'Mean Residual', 'Count']].values.tolist()
+
+table = ax5.table(cellText=table_data, 
+                  cellLoc='center', 
+                  loc='center',
+                  colWidths=[0.12, 0.12, 0.12, 0.12, 0.15, 0.1])
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.5)
+
+# Highlight headers
+for i in range(len(table_data[0])):
+    table[(0, i)].set_facecolor('#404040')
+    table[(0, i)].set_text_props(color='white', weight='bold')
+
+# Add title
+ax5.set_title('Statistical Summary of Residuals', fontsize=16, pad=20)
+
+# Create custom legends
+from matplotlib.lines import Line2D
+legend_elements = [
+    Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', markersize=10, label='XGB'),
+    Line2D([0], [0], marker='s', color='w', markerfacecolor='gray', markersize=10, label='RF'),
+    Line2D([0], [0], marker='^', color='w', markerfacecolor='gray', markersize=10, label='DT'),
+    Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markersize=10, label='SVM'),
+    Line2D([0], [0], color=set_colors['Training'], lw=4, label='Training'),
+    Line2D([0], [0], color=set_colors['Testing'], lw=4, label='Testing'),
+    Line2D([0], [0], color=set_colors['Validation'], lw=4, label='Validation')
+]
+
+plt.figlegend(handles=legend_elements, loc='lower center', 
+              ncol=7, frameon=True, fontsize=12, bbox_to_anchor=(0.5, 0.02))
+
+plt.tight_layout(rect=[0, 0.05, 1, 0.97])
+plt.show()
